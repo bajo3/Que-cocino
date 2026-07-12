@@ -10,7 +10,9 @@ function getStructuredAiClient() {
     return {
       apiKey: zaiKey,
       baseURL: process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4/",
-      model: process.env.ZAI_FAST_MODEL ?? process.env.ZAI_MODEL ?? "glm-4.7-flash",
+      // Las extracciones modifican datos propuestos al usuario: priorizamos el
+      // modelo principal, más consistente con contratos JSON que el fast model.
+      model: process.env.ZAI_MODEL ?? process.env.ZAI_FAST_MODEL ?? "glm-5",
       source: "zai" as const,
     };
   }
