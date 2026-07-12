@@ -9,7 +9,8 @@ export function getStructuredAiModel(): LanguageModel | null {
   const zaiKey = process.env.ZAI_API_KEY;
   if (zaiKey) {
     const provider = createOpenAI({ apiKey: zaiKey, baseURL: process.env.ZAI_BASE_URL });
-    return provider(process.env.ZAI_FAST_MODEL ?? process.env.ZAI_MODEL ?? "glm-4.7-flash");
+    // Z.AI expone Chat Completions, pero no la Responses API de OpenAI.
+    return provider.chat(process.env.ZAI_FAST_MODEL ?? process.env.ZAI_MODEL ?? "glm-4.7-flash");
   }
 
   const openAiKey = process.env.OPENAI_API_KEY;
