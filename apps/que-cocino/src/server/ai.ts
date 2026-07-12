@@ -1,20 +1,42 @@
-import { createOpenAI } from "@ai-sdk/openai";
-import type { LanguageModel } from "ai";
+import type { z } from "zod";
 
 /**
- * Z.AI/GLM expone una API compatible con OpenAI. Se prefiere cuando está
- * configurada para reutilizar la cuenta del usuario; OpenAI queda como fallback.
+ * Z.AI/GLM expone Chat Completions compatibles con OpenAI, pero no la Responses
+ * API ni JSON Schema estricto. Forzamos JSON object y luego lo validamos con Zod.
  */
-export function getStructuredAiModel(): LanguageModel | null {
+function getStructuredAiClient() {
   const zaiKey = process.env.ZAI_API_KEY;
   if (zaiKey) {
-    const provider = createOpenAI({ apiKey: zaiKey, baseURL: process.env.ZAI_BASE_URL });
-    // Z.AI expone Chat Completions, pero no la Responses API de OpenAI.
-    return provider.chat(process.env.ZAI_FAST_MODEL ?? process.env.ZAI_MODEL ?? "glm-4.7-flash");
+    return {
+      apiKey: zaiKey,
+      baseURL: process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4/",
+      model: process.env.ZAI_FAST_MODEL ?? process.env.ZAI_MODEL ?? "glm-4.7-flash",
+      source: "zai" as const,
+    };
   }
 
   const openAiKey = process.env.OPENAI_API_KEY;
   if (!openAiKey) return null;
-  const provider = createOpenAI({ apiKey: openAiKey });
-  return provider(process.env.OPENAI_MODEL ?? "gpt-5-mini");
+  return { apiKey: openAiKey, baseURL: "https://api.openai.com/v1", model: process.env.OPENAI_MODEL ?? "gpt-5-mini", source: "openai" as const };
+}
+
+export async function generateStructuredObject<T>(schema: z.ZodType<T>, input: { system: string; prompt: string }) {
+  const provider = getStructuredAiClient();
+  if (!provider) return null;
+  const response = await fetch(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+    model: provider.model,
+    temperature: 0.1,
+    response_format: { type: "json_object" },
+    messages: [{ role: "system", content: input.system }, { role: "user", content: input.prompt }],
+    ...(provider.source === "zai" ? { thinking: { type: "disabled" } } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`El proveedor de IA respondió ${response.status}.`);
+  const completion = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+  const raw = completion.choices?.[0]?.message?.content;
+  if (!raw) throw new Error("El proveedor de IA no devolvió contenido.");
+  return { output: schema.parse(JSON.parse(raw)), source: provider.source };
 }
