@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const fallback = parseInventoryText(sanitized, ingredients);
     try {
       const result = await generateStructuredObject(interpretationSchema, {
-        system: "Extraé alimentos de una frase en español rioplatense. Devolvé exclusivamente un objeto JSON con {items:[{name,quantity,unit,estimatedGrams,estimatedMilliliters,confidence,approximate}]}. No inventes productos. Las conversiones caseras son aproximadas y dependen del catálogo.",
+        system: "Extraé alimentos de una frase en español rioplatense. Devolvé exclusivamente JSON sin texto adicional. El objeto raíz DEBE tener sólo la clave items: {\"items\":[{\"name\":\"papa\",\"quantity\":2,\"unit\":\"kg\",\"estimatedGrams\":2000,\"estimatedMilliliters\":null,\"confidence\":0.98,\"approximate\":false}]}. Nunca uses las claves ingredients, products ni alimentos. No inventes productos. Las conversiones caseras son aproximadas y dependen del catálogo.",
         prompt: `Catálogo permitido: ${ingredients.map((item) => `${item.canonicalName} (${item.aliases.join(", ")})`).join("; ")}\nTexto del usuario: ${sanitized}`,
       });
       if (!result) return Response.json({ items: fallback, source: "local" });

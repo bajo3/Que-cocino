@@ -38,5 +38,11 @@ export async function generateStructuredObject<T>(schema: z.ZodType<T>, input: {
   const completion = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
   const raw = completion.choices?.[0]?.message?.content;
   if (!raw) throw new Error("El proveedor de IA no devolvió contenido.");
-  return { output: schema.parse(JSON.parse(raw)), source: provider.source };
+  const parsed = JSON.parse(raw) as unknown;
+  const validation = schema.safeParse(parsed);
+  if (!validation.success) {
+    const keys = parsed && typeof parsed === "object" ? Object.keys(parsed as Record<string, unknown>).join(", ") : typeof parsed;
+    throw new Error(`La IA devolvió una estructura incompatible. Claves recibidas: ${keys || "ninguna"}.`);
+  }
+  return { output: validation.data, source: provider.source };
 }
