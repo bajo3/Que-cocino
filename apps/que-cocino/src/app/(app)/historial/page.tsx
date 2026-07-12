@@ -1,0 +1,12 @@
+import Link from "next/link";
+import { History, RotateCcw, Soup } from "lucide-react";
+import { auth } from "@/auth";
+import { getPrisma } from "@/server/prisma";
+import { PageHeader } from "@/components/page-header";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
+export default async function HistoryPage() { const session = await auth(); const events = await getPrisma().cookingEvent.findMany({ where: { userId: session!.user.id }, include: { recipe: true, usages: { include: { ingredient: true } }, leftovers: true }, orderBy: { cookedAt: "desc" } }); return <><PageHeader eyebrow="Tu recorrido" title="Historial" description="Cada comida, ajuste y porción que guardaste." />{events.length ? <div className="space-y-4">{events.map((event) => <Card key={event.id}><CardContent className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:items-center"><div><div className="mb-2 flex flex-wrap items-center gap-2"><Badge tone="green">{formatDate(event.cookedAt)}</Badge><Badge>{event.servings} porciones</Badge>{event.leftovers.length > 0 && <Badge tone="amber"><Soup className="mr-1 size-3" />{event.leftovers[0].portions} sobrantes</Badge>}</div><h2 className="text-xl font-extrabold">{event.recipe.name}</h2><p className="mt-2 text-sm text-muted-foreground">Usaste {event.usages.map((usage) => `${Number(usage.actualQuantity).toLocaleString("es-AR")} de ${usage.ingredient.canonicalName}`).join(" · ")}</p>{event.estimatedCalories && <p className="mt-2 text-xs text-muted-foreground">Nutrición estimada: ≈ {event.estimatedCalories} kcal · ≈ {Number(event.estimatedProtein)} g proteína</p>}</div><Link href={`/recetas/${event.recipe.slug}`}><Button variant="outline"><RotateCcw className="size-4" />Volver a cocinar</Button></Link></CardContent></Card>)}</div> : <Card><CardContent className="grid min-h-72 place-items-center text-center"><div><History className="mx-auto mb-4 size-12 text-muted-foreground" /><h2 className="text-xl font-bold">Todavía no cocinaste una receta</h2><p className="mt-2 text-sm text-muted-foreground">Cuando confirmes una comida, aparecerá acá.</p><Link href="/cocinar"><Button className="mt-5">Buscar mi primera receta</Button></Link></div></CardContent></Card>}</>; }

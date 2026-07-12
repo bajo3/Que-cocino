@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+.git
+.wa_auth
+**/.wa_auth
+*.log
+.env
+.env.*

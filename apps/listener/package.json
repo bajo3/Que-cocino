@@ -1,0 +1,33 @@
+{
+  "name": "listener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --env-file-if-exists=../../.env --watch --import tsx src/index.ts",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo \"(no linter configured)\"",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@wma/ai": "workspace:*",
+    "@wma/db": "workspace:*",
+    "@wma/shared": "workspace:*",
+    "@wma/whatsapp": "workspace:*",
+    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "bullmq": "^5.21.2",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.19.1"
+  }
+}

@@ -1,0 +1,29 @@
+node_modules/
+.pnpm-store/
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# WhatsApp auth state (session credentials)
+.wa_auth/
+**/.wa_auth/
+auth/
+
+# logs
+*.log
+logs/
+backups/
+wa-qr.*
+**/wa-qr.*
+.artifacts/
+.claude/*.lock
+
+# os
+.DS_Store
+Thumbs.db

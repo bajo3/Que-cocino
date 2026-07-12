@@ -1,0 +1,26 @@
+{
+  "name": "dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env ./scripts/run-next.mjs dev -p 3003",
+    "build": "node --env-file-if-exists=../../.env ./scripts/run-next.mjs build",
+    "start": "node --env-file-if-exists=../../.env ./scripts/run-next.mjs start -p 3003",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(no linter configured)\"",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@wma/db": "workspace:*",
+    "@wma/shared": "workspace:*",
+    "bullmq": "^5.21.2",
+    "ioredis": "^5.4.1",
+    "next": "14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.11",
+    "@types/react-dom": "18.3.0"
+  }
+}

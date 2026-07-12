@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IngredientCategory {
+  MEAT
+  VEGETABLE
+  FRUIT
+  DAIRY
+  EGGS
+  GRAINS_PASTA
+  LEGUMES
+  CANNED
+  CONDIMENTS
+  BEVERAGES
+  FROZEN
+  OTHER
+}
+
+enum NormalizedUnit {
+  GRAM
+  MILLILITER
+  UNIT
+}
+
+enum InventoryLocation {
+  FRIDGE
+  FREEZER
+  PANTRY
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ShoppingPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum ShoppingSource {
+  MANUAL
+  OUT_OF_STOCK
+  LOW_STOCK
+  RECIPE
+  RECOMMENDED
+}
+
+enum Goal {
+  LOSE_FAT
+  MAINTAIN
+  GAIN_MUSCLE
+  EAT_HEALTHIER
+}
+
+model User {
+  id            String          @id @default(cuid())
+  name          String?
+  email         String          @unique
+  passwordHash  String?
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  preferences   UserPreferences?
+  inventory     InventoryItem[]
+  cookingEvents CookingEvent[]
+  leftovers     Leftover[]
+  shoppingItems ShoppingItem[]
+}
+
+model UserPreferences {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  goal           Goal?
+  dailyCalories  Int?
+  dailyProtein   Int?
+  householdSize  Int      @default(2)
+  allergies      String[] @default([])
+  intolerances   String[] @default([])
+  dislikedFoods  String[] @default([])
+  preferences    String[] @default([])
+  dietType       String?
+  cupSizeMl      Int      @default(240)
+  glassSizeMl    Int      @default(250)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Ingredient {
+  id             String                  @id @default(cuid())
+  canonicalName  String                  @unique
+  category       IngredientCategory
+  defaultUnit    String
+  normalizedUnit NormalizedUnit
+  gramsPerUnit   Decimal?                @db.Decimal(12, 3)
+  density        Decimal?                @db.Decimal(12, 5)
+  aliases        String[]                @default([])
+  createdAt      DateTime                @default(now())
+  inventoryItems InventoryItem[]
+  equivalences   IngredientEquivalence[]
+  recipeItems    RecipeIngredient[]
+  cookingUsages  CookingUsage[]
+  shoppingItems  ShoppingItem[]
+}
+
+model IngredientEquivalence {
+  id                 String         @id @default(cuid())
+  ingredientId       String
+  householdUnit      String
+  householdQuantity  Decimal        @default(1) @db.Decimal(12, 3)
+  normalizedQuantity Decimal        @db.Decimal(12, 3)
+  normalizedUnit     NormalizedUnit
+  note               String?
+  ingredient         Ingredient     @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@unique([ingredientId, householdUnit, householdQuantity])
+}
+
+model InventoryItem {
+  id                 String            @id @default(cuid())
+  userId             String
+  ingredientId       String?
+  customName         String?
+  quantity           Decimal           @db.Decimal(12, 3)
+  unit               String
+  normalizedQuantity Decimal           @db.Decimal(12, 3)
+  normalizedUnit     NormalizedUnit
+  location           InventoryLocation
+  expirationDate     DateTime?
+  opened             Boolean           @default(false)
+  minimumStock       Decimal?          @db.Decimal(12, 3)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient         Ingredient?         @relation(fields: [ingredientId], references: [id], onDelete: SetNull)
+  cookingUsages      CookingUsage[]
+
+  @@index([userId, expirationDate])
+  @@index([userId, ingredientId])
+}
+
+model Recipe {
+  id               String             @id @default(cuid())
+  slug             String             @unique
+  name             String
+  description      String
+  servings         Int
+  prepTime         Int
+  cookTime         Int
+  difficulty       Difficulty
+  instructions     Json
+  tags             String[]           @default([])
+  estimatedCalories Int?
+  estimatedProtein Decimal?           @db.Decimal(8, 2)
+  source           String
+  createdAt        DateTime           @default(now())
+  ingredients      RecipeIngredient[]
+  cookingEvents    CookingEvent[]
+}
+
+model RecipeIngredient {
+  id                 String         @id @default(cuid())
+  recipeId           String
+  ingredientId       String
+  quantity           Decimal        @db.Decimal(12, 3)
+  unit               String
+  normalizedQuantity Decimal        @db.Decimal(12, 3)
+  normalizedUnit     NormalizedUnit
+  householdMeasure   String?
+  optional           Boolean        @default(false)
+  substitutions      String[]       @default([])
+  recipe             Recipe         @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient         Ingredient     @relation(fields: [ingredientId], references: [id])
+
+  @@unique([recipeId, ingredientId])
+}
+
+model CookingEvent {
+  id                 String         @id @default(cuid())
+  userId             String
+  recipeId           String
+  servings           Int
+  cookedAt           DateTime       @default(now())
+  notes              String?
+  estimatedCalories  Int?
+  estimatedProtein   Decimal?       @db.Decimal(8, 2)
+  adjustments        Json?
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe             Recipe         @relation(fields: [recipeId], references: [id])
+  usages             CookingUsage[]
+  leftovers          Leftover[]
+
+  @@index([userId, cookedAt])
+}
+
+model CookingUsage {
+  id                 String         @id @default(cuid())
+  cookingEventId     String
+  inventoryItemId    String
+  ingredientId       String
+  plannedQuantity    Decimal        @db.Decimal(12, 3)
+  actualQuantity     Decimal        @db.Decimal(12, 3)
+  normalizedQuantity Decimal        @db.Decimal(12, 3)
+  cookingEvent       CookingEvent   @relation(fields: [cookingEventId], references: [id], onDelete: Cascade)
+  inventoryItem      InventoryItem  @relation(fields: [inventoryItemId], references: [id])
+  ingredient         Ingredient     @relation(fields: [ingredientId], references: [id])
+}
+
+model Leftover {
+  id             String            @id @default(cuid())
+  userId         String
+  cookingEventId String
+  name           String
+  portions       Int
+  location       InventoryLocation
+  expirationDate DateTime?
+  notes          String?
+  consumed       Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cookingEvent   CookingEvent      @relation(fields: [cookingEventId], references: [id], onDelete: Cascade)
+}
+
+model ShoppingItem {
+  id           String           @id @default(cuid())
+  userId       String
+  ingredientId String?
+  customName   String?
+  quantity     Decimal          @db.Decimal(12, 3)
+  unit         String
+  priority     ShoppingPriority @default(NORMAL)
+  source       ShoppingSource   @default(MANUAL)
+  completed    Boolean          @default(false)
+  completedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient?      @relation(fields: [ingredientId], references: [id], onDelete: SetNull)
+
+  @@index([userId, completed])
+}

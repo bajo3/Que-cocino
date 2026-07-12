@@ -1,0 +1,28 @@
+{
+  "name": "whatsapp-memory-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "migrate": "node --env-file=.env packages/db/dist/migrate.js",
+    "listener": "pnpm --filter listener start",
+    "worker": "pnpm --filter worker start",
+    "dashboard": "pnpm --filter dashboard start",
+    "assistant": "node --env-file=.env scripts/supervisor.mjs",
+    "backup": "node --env-file=.env scripts/backup.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.0",
+    "qrcode": "^1.5.4",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
