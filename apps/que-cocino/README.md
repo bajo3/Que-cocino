@@ -29,7 +29,7 @@ nutrición clínica.
 - Componentes locales basados en las convenciones de shadcn/ui.
 - PostgreSQL en Supabase o Neon y Prisma ORM.
 - Auth.js con sesiones JWT y credenciales para el MVP.
-- AI SDK v6 y proveedor OpenAI para salida estructurada.
+- AI SDK v6 y proveedores compatibles con OpenAI (Z.AI/GLM prioritario, OpenAI opcional) para salida estructurada.
 - Zod para todos los contratos y React Hook Form para formularios.
 - Vitest para reglas puras.
 
@@ -92,6 +92,9 @@ La cuenta es sólo para desarrollo; en producción se debe reemplazar o eliminar
 `POST /api/interpret` recibe texto sanitizado y solicita exclusivamente datos que
 cumplen `interpretationSchema`. La respuesta vuelve al navegador para corrección; el
 modelo nunca recibe una herramienta de escritura ni acceso a Prisma.
+
+Si existen `ZAI_API_KEY`, `ZAI_BASE_URL` y un modelo GLM, se usa Z.AI/GLM. Si no,
+el servidor intenta `OPENAI_API_KEY` como fallback.
 
 Si falta `OPENAI_API_KEY` o la llamada falla, un parser determinista reconoce números,
 unidades y alias rioplatenses del catálogo. Inventario, recetas, compras, cocción e

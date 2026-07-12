@@ -1,4 +1,3 @@
-import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, Output } from "ai";
 import { apiError, readJson } from "@/server/api";
 import { requireUserId } from "@/server/authz";
@@ -6,6 +5,7 @@ import { assertRateLimit } from "@/server/rate-limit";
 import { getPrisma } from "@/server/prisma";
 import { interpretRequestSchema, interpretationSchema } from "@/schemas/inventory";
 import { parseInventoryText } from "@/domain/text-parser";
+import { getStructuredAiModel } from "@/server/ai";
 
 export async function POST(request: Request) {
   try {
@@ -15,11 +15,11 @@ export async function POST(request: Request) {
     const sanitized = text.replace(/[<>]/g, "");
     const ingredients = await getPrisma().ingredient.findMany({ include: { equivalences: true } });
     const fallback = parseInventoryText(sanitized, ingredients);
-    if (!process.env.OPENAI_API_KEY) return Response.json({ items: fallback, source: "local" });
+    const model = getStructuredAiModel();
+    if (!model) return Response.json({ items: fallback, source: "local" });
     try {
-      const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const { output } = await generateText({
-        model: openai(process.env.OPENAI_MODEL ?? "gpt-5-mini"),
+        model,
         output: Output.object({ schema: interpretationSchema }),
         system: "Extraé alimentos de una frase en español rioplatense. Respondé sólo mediante el esquema. No inventes productos. Las conversiones caseras son aproximadas y dependen del catálogo.",
         prompt: `Catálogo permitido: ${ingredients.map((item) => `${item.canonicalName} (${item.aliases.join(", ")})`).join("; ")}\nTexto del usuario: ${sanitized}`,
