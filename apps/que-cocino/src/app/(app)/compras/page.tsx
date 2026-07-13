@@ -1,10 +1,10 @@
-import { auth } from "@/auth";
+import { requirePageUser } from "@/server/authz";
 import { getPrisma } from "@/server/prisma";
 import { ShoppingScreen } from "@/components/shopping-screen";
+import { getShoppingUnlocks } from "@/features/recipes/service";
 
 export const dynamic = "force-dynamic";
 export default async function ShoppingPage() {
-  const session = await auth(); const db = getPrisma(); const [items, recipes] = await Promise.all([db.shoppingItem.findMany({ where: { userId: session!.user.id }, include: { ingredient: true }, orderBy: [{ completed: "asc" }, { priority: "desc" }] }), db.recipe.findMany({ include: { ingredients: { include: { ingredient: true } } } })]);
-  const unlocks = Object.fromEntries(recipes.flatMap((recipe) => recipe.ingredients.map((item) => item.ingredient.canonicalName)).reduce((map, name) => map.set(name, (map.get(name) ?? 0) + 1), new Map<string, number>()));
+  const user = await requirePageUser(); const db = getPrisma(); const [items, unlocks] = await Promise.all([db.shoppingItem.findMany({ where: { userId: user.id }, include: { ingredient: true }, orderBy: [{ completed: "asc" }, { priority: "desc" }] }), getShoppingUnlocks(user.id)]);
   return <ShoppingScreen initialItems={JSON.parse(JSON.stringify(items))} unlocks={unlocks} />;
 }

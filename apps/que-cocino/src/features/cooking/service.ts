@@ -8,8 +8,14 @@ type CookInput = z.infer<typeof cookRecipeSchema>;
 export async function cookRecipe(userId: string, input: CookInput) {
   const db = getPrisma();
   return db.$transaction(async (tx) => {
-    const recipe = await tx.recipe.findUnique({ where: { id: input.recipeId } });
+    const recipe = await tx.recipe.findUnique({ where: { id: input.recipeId }, include: { ingredients: true } });
     if (!recipe) throw new HttpError(404, "Receta no encontrada.");
+    const requiredIngredientIds = recipe.ingredients.filter((item) => !item.optional).map((item) => item.ingredientId);
+    const recipeIngredientIds = new Set(recipe.ingredients.map((item) => item.ingredientId));
+    const suppliedIngredientIds = new Set(input.usages.map((usage) => usage.ingredientId));
+    if (input.usages.some((usage) => !recipeIngredientIds.has(usage.ingredientId))) throw new HttpError(400, "Sólo podés descontar ingredientes de esta receta.");
+    if (requiredIngredientIds.some((ingredientId) => !suppliedIngredientIds.has(ingredientId))) throw new HttpError(400, "Falta confirmar uno o más ingredientes obligatorios.");
+    if (new Set(input.usages.map((usage) => usage.inventoryItemId)).size !== input.usages.length) throw new HttpError(400, "Un lote no puede descontarse dos veces.");
     const verified = [] as Array<{ id: string; ingredientId: string; planned: number; actual: number }>;
     for (const usage of input.usages) {
       const item = await tx.inventoryItem.findFirst({ where: { id: usage.inventoryItemId, userId, ingredientId: usage.ingredientId } });

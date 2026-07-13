@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const recipeFiltersSchema = z.object({
-  servings: z.coerce.number().int().min(1).max(20).default(4), maxTime: z.coerce.number().int().min(5).max(300).optional(),
+  servings: z.coerce.number().int().min(1).max(20).optional(), maxTime: z.coerce.number().int().min(5).max(300).optional(),
   difficulty: z.enum(["EASY", "MEDIUM", "HARD"]).optional(), mealType: z.enum(["BREAKFAST", "LUNCH", "SNACK", "DINNER"]).optional(),
   mode: z.enum(["IN_STOCK", "ONE_MISSING", "FIT", "HIGH_PROTEIN", "BUDGET", "QUICK", "FREEZER"]).default("IN_STOCK"),
   include: z.array(z.string()).default([]), exclude: z.array(z.string()).default([]), expiringFirst: z.boolean().default(false),

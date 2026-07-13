@@ -1,9 +1,7 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
 import { AppShell } from "@/components/app-shell";
+import { requirePageUser } from "@/server/authz";
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-  return <AppShell userName={session.user.name}>{children}</AppShell>;
+  const user = await requirePageUser();
+  return <AppShell userName={user.name}>{children}</AppShell>;
 }

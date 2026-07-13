@@ -1,1 +1,10 @@
-.vercel
+node_modules/
+.next/
+.artifacts/
+
+# Nunca versionar configuraciones locales ni secretos.
+.env*
+!.env.example
+
+.vercel/
+*.tsbuildinfo

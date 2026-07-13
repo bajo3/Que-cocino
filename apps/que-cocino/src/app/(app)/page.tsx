@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, CalendarClock, ChefHat, CircleGauge, PackageOpen, Plus, ShoppingBasket, Sparkles } from "lucide-react";
-import { auth } from "@/auth";
+import { requirePageUser } from "@/server/authz";
 import { getPrisma } from "@/server/prisma";
 import { getCompatibleRecipes } from "@/features/recipes/service";
 import { Button } from "@/components/ui/button";
@@ -11,18 +11,18 @@ import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
-  const session = await auth(); const userId = session!.user.id; const db = getPrisma(); const now = new Date(); const soon = new Date(now.getTime() + 7 * 86400000);
+  const user = await requirePageUser(); const userId = user.id; const db = getPrisma(); const now = new Date(); const soon = new Date(now.getTime() + 7 * 86400000);
   const [inventoryCount, expiring, lowStock, leftovers, recent, recipes, shoppingCount] = await Promise.all([
     db.inventoryItem.count({ where: { userId, normalizedQuantity: { gt: 0 } } }),
     db.inventoryItem.findMany({ where: { userId, normalizedQuantity: { gt: 0 }, expirationDate: { gte: now, lte: soon } }, include: { ingredient: true }, orderBy: { expirationDate: "asc" }, take: 4 }),
     db.inventoryItem.findMany({ where: { userId, minimumStock: { not: null }, normalizedQuantity: { gt: 0 } }, include: { ingredient: true }, take: 4 }),
     db.leftover.findMany({ where: { userId, consumed: false }, orderBy: { expirationDate: "asc" }, take: 4 }),
     db.cookingEvent.findMany({ where: { userId }, include: { recipe: true }, orderBy: { cookedAt: "desc" }, take: 3 }),
-    getCompatibleRecipes(userId, { servings: 4, mode: "IN_STOCK" }),
+    getCompatibleRecipes(userId, { mode: "IN_STOCK" }),
     db.shoppingItem.count({ where: { userId, completed: false } }),
   ]);
   const actualLowStock = lowStock.filter((item) => item.minimumStock && Number(item.normalizedQuantity) <= Number(item.minimumStock)); const daily = recipes[0];
-  return <><PageHeader eyebrow="Tu cocina hoy" title={`Hola, ${session?.user.name?.split(" ")[0] || "chef"}`} description="Tenés todo ordenado para decidir rápido y aprovechar mejor cada alimento." action={<Link href="/despensa?add=true"><Button variant="outline"><Plus className="size-4" />Agregar alimentos</Button></Link>} />
+  return <><PageHeader eyebrow="Tu cocina hoy" title={`Hola, ${user.name?.split(" ")[0] || "chef"}`} description="Tenés todo ordenado para decidir rápido y aprovechar mejor cada alimento." action={<Link href="/despensa?add=true"><Button variant="outline"><Plus className="size-4" />Agregar alimentos</Button></Link>} />
     <Card className="relative mb-6 overflow-hidden border-0 bg-primary text-primary-foreground"><div className="absolute -right-12 -top-16 size-52 rounded-full bg-white/10" /><CardContent className="relative grid gap-6 p-6 sm:p-8 md:grid-cols-[1fr_auto] md:items-center"><div><Badge className="mb-3 bg-white/15 text-white">Recomendación del día</Badge><h2 className="max-w-2xl text-2xl font-extrabold tracking-tight sm:text-3xl">{daily?.recipe.name ?? "Tu próxima comida empieza en la despensa"}</h2><p className="mt-2 max-w-xl text-sm leading-6 text-white/80">{daily?.recipe.description ?? "Agregá algunos alimentos y te mostraremos recetas que podés cocinar sin comprar nada."}</p></div><Link href={daily ? `/recetas/${daily.recipe.slug}` : "/despensa?add=true"}><Button size="lg" className="bg-white text-primary hover:bg-white/90">{daily ? "Ver receta" : "Cargar alimentos"}<ArrowRight className="size-4" /></Button></Link></CardContent></Card>
     <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">{[[PackageOpen, inventoryCount, "productos disponibles", "/despensa"], [CalendarClock, expiring.length, "próximos a vencer", "/despensa?sort=expiration"], [ShoppingBasket, shoppingCount, "en la lista", "/compras"], [ChefHat, leftovers.length, "sobras guardadas", "/despensa"]].map(([Icon, value, label, href]) => { const ItemIcon = Icon as typeof PackageOpen; return <Link href={String(href)} key={String(label)}><Card className="h-full"><CardContent className="p-4 sm:p-5"><ItemIcon className="mb-4 size-5 text-primary" /><strong className="block text-2xl font-extrabold">{String(value)}</strong><span className="text-xs text-muted-foreground sm:text-sm">{String(label)}</span></CardContent></Card></Link>; })}</div>
     <div className="grid gap-6 xl:grid-cols-2"><Card><CardHeader><CardTitle className="flex items-center gap-2"><CalendarClock className="size-5 text-amber-600" />Usá primero</CardTitle><CardDescription>Productos que vencen durante los próximos 7 días.</CardDescription></CardHeader><CardContent>{expiring.length ? <div className="space-y-3">{expiring.map((item) => <div className="flex items-center justify-between rounded-2xl bg-muted p-3" key={item.id}><div><p className="font-semibold capitalize">{item.ingredient?.canonicalName ?? item.customName}</p><p className="text-xs text-muted-foreground">{Number(item.quantity)} {item.unit}</p></div><Badge tone="amber">{formatDate(item.expirationDate)}</Badge></div>)}</div> : <Empty icon={Sparkles} text="No hay vencimientos cercanos. Bien ahí." />}</CardContent></Card>
