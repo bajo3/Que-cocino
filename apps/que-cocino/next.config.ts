@@ -4,9 +4,6 @@ const nextConfig: NextConfig = {
   experimental: {
     typedEnv: true,
   },
-  turbopack: {
-    root: process.cwd(),
-  },
 };
 
 export default nextConfig;
