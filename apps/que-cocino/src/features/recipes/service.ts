@@ -1,15 +1,16 @@
+import type { UserPreferences } from "@prisma/client";
 import { calculateCompatibility } from "@/domain/compatibility";
 import { recipeMatchesPreferences } from "@/domain/recipe-preferences";
 import { getPrisma } from "@/server/prisma";
 
 type RecipeFilters = { servings?: number; maxTime?: number; difficulty?: string; mode?: string; include?: string[]; exclude?: string[]; expiringFirst?: boolean };
 
-export async function getCompatibleRecipes(userId: string, filters: RecipeFilters) {
+export async function getCompatibleRecipes(userId: string, filters: RecipeFilters, knownPreferences?: UserPreferences | null) {
   const db = getPrisma();
   const [recipes, inventory, preferences] = await Promise.all([
     db.recipe.findMany({ where: { ...(filters.difficulty ? { difficulty: filters.difficulty as never } : {}), ...(filters.maxTime ? { AND: [{ prepTime: { lte: filters.maxTime } }, { cookTime: { lte: filters.maxTime } }] } : {}) }, include: { ingredients: { include: { ingredient: true } } } }),
     db.inventoryItem.findMany({ where: { userId, normalizedQuantity: { gt: 0 } }, include: { ingredient: true } }),
-    db.userPreferences.findUnique({ where: { userId } }),
+    knownPreferences === undefined ? db.userPreferences.findUnique({ where: { userId } }) : Promise.resolve(knownPreferences),
   ]);
   const servings = filters.servings ?? preferences?.householdSize ?? 2;
   return recipes.map((recipe) => ({ recipe, compatibility: calculateCompatibility(recipe, inventory, servings) })).filter(({ recipe, compatibility }) => {
