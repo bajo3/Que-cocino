@@ -12,8 +12,8 @@ export function calculateCompatibility(recipe: RecipeWithIngredients, inventory:
     return { ingredient: required.ingredient, required, needed, stock, missing: Math.max(0, needed - stock), batches };
   });
   const required = items.filter((item) => !item.required.optional);
-  const covered = required.filter((item) => item.missing <= 0).length;
+  const coverage = required.reduce((sum, item) => sum + (item.needed > 0 ? Math.min(1, item.stock / item.needed) : 1), 0);
   const sevenDays = Date.now() + 7 * 86400000;
   const expiringIngredients = items.filter((item) => item.batches.some((batch) => batch.expirationDate && batch.expirationDate.getTime() <= sevenDays)).map((item) => item.ingredient);
-  return { score: required.length ? Math.round((covered / required.length) * 100) : 100, available: items.filter((item) => item.missing <= 0), missing: items.filter((item) => item.missing > 0), canCook: required.every((item) => item.missing <= 0), expiringIngredients };
+  return { score: required.length ? Math.round((coverage / required.length) * 100) : 100, available: items.filter((item) => item.missing <= 0), partiallyAvailable: items.filter((item) => item.missing > 0 && item.stock > 0), missing: items.filter((item) => item.missing > 0), canCook: required.every((item) => item.missing <= 0), expiringIngredients };
 }

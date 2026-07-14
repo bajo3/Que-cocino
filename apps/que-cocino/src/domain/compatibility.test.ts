@@ -27,4 +27,15 @@ describe("calculateCompatibility", () => {
     expect(result.canCook).toBe(true);
     expect(result.expiringIngredients.map((item) => item.canonicalName)).toEqual(["huevo"]);
   });
+  it("reconoce cuando hay una parte del ingrediente y muestra progreso real", () => {
+    const inventory = [
+      { ingredientId: "egg", normalizedQuantity: 1, expirationDate: null, ingredient: egg },
+      { ingredientId: "potato", normalizedQuantity: 400, expirationDate: null, ingredient: potato },
+    ];
+    const result = calculateCompatibility(recipe as never, inventory as never);
+    expect(result.canCook).toBe(false);
+    expect(result.score).toBe(75);
+    expect(result.partiallyAvailable.map((item) => item.ingredient.canonicalName)).toEqual(["huevo"]);
+    expect(result.missing[0].missing).toBe(1);
+  });
 });
