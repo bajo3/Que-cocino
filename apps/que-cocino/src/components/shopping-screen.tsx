@@ -45,7 +45,6 @@ export function ShoppingScreen({
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
   const [selectedDays, setSelectedDays] = useState<ShoppingPlanDays>(7);
-  const [addedPlans, setAddedPlans] = useState<ShoppingPlanDays[]>([]);
   const [addingPlan, setAddingPlan] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [completing, setCompleting] = useState<Item | null>(null);
@@ -62,7 +61,6 @@ export function ShoppingScreen({
   }, {})), [items]);
   const topUnlocks = Object.entries(unlocks).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const selectedPlan = plans.find((plan) => plan.days === selectedDays) ?? plans[0];
-  const planWasAdded = addedPlans.includes(selectedDays);
 
   async function createItem(productName: string, itemQuantity = quantity, itemUnit = unit, itemPriority = priority, source = "MANUAL") {
     const response = await fetch("/api/shopping", {
@@ -100,7 +98,7 @@ export function ShoppingScreen({
   }
 
   async function addPlan() {
-    if (!selectedPlan?.items.length || planWasAdded) return;
+    if (!selectedPlan?.items.length) return;
     setAddingPlan(true);
     const response = await fetch("/api/shopping/batch", {
       method: "POST",
@@ -119,9 +117,8 @@ export function ShoppingScreen({
     setAddingPlan(false);
     if (!response.ok) return toast.error(data.error);
     setItems(data.items);
-    setAddedPlans((current) => [...current, selectedDays]);
-    router.refresh();
     toast.success(`Compra de ${selectedDays} días agregada a tu lista`);
+    window.setTimeout(() => window.location.reload(), 600);
   }
 
   async function complete() {
@@ -204,9 +201,9 @@ export function ShoppingScreen({
               <p className="font-bold">Menú estimado</p>
               <p className="truncate text-sm text-muted-foreground">{selectedPlan.recipes.slice(0, 6).map((recipe) => `${recipe.name}${recipe.times > 1 ? ` ×${recipe.times}` : ""}`).join(" · ")}{selectedPlan.recipes.length > 6 ? " · …" : ""}</p>
             </div>
-            <Button onClick={addPlan} disabled={addingPlan || planWasAdded} className="shrink-0">
-              {planWasAdded ? <CheckCircle2 className="size-4" /> : <ShoppingBasket className="size-4" />}
-              {addingPlan ? "Agregando…" : planWasAdded ? "Plan agregado" : "Agregar compra completa"}
+            <Button onClick={addPlan} disabled={addingPlan} className="shrink-0">
+              <ShoppingBasket className="size-4" />
+              {addingPlan ? "Agregando…" : "Agregar compra completa"}
             </Button>
           </div>
         </> : <div className="rounded-2xl bg-card p-6 text-center">
