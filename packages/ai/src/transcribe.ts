@@ -30,8 +30,17 @@ export async function transcribeAudio(
   const llm = getTranscriptionLLM();
   if (!llm) return null;
   const file = await toFile(buffer, opts.filename ?? 'audio.ogg', { type: opts.mime ?? 'audio/ogg' });
-  const res = await llm.client.audio.transcriptions.create({ model: llm.model, file });
-  return res.text ?? null;
+  const res = await llm.client.audio.transcriptions.create({
+    model: llm.model,
+    file,
+    language: 'es',
+    prompt: env.AUDIO_TRANSCRIPTION_PROMPT,
+  });
+  const text = res.text?.trim() || null;
+  if (text && hasUnexpectedWritingSystem(text)) {
+    throw new Error('Transcription rejected because the detected language is not Spanish');
+  }
+  return text;
 }
 
 async function transcribeWithZai(
@@ -43,33 +52,69 @@ async function transcribeWithZai(
   const transcripts: string[] = [];
 
   for (let index = 0; index < chunks.length; index++) {
-    const form = new FormData();
-    form.append('model', env.ZAI_TRANSCRIPTION_MODEL);
-    form.append('stream', 'false');
-    if (transcripts.length > 0) {
-      form.append('prompt', transcripts.join(' ').slice(-4000));
-    }
-    form.append(
-      'file',
-      new Blob([new Uint8Array(chunks[index]!)], { type: 'audio/wav' }),
-      `audio-${index + 1}.wav`,
-    );
+    const previous = transcripts.join(' ').slice(-2500);
+    const prompt = previous
+      ? `${env.AUDIO_TRANSCRIPTION_PROMPT}\nContexto literal anterior: ${previous}`
+      : env.AUDIO_TRANSCRIPTION_PROMPT;
+    let text = await requestZaiTranscription(chunks[index]!, index, prompt);
 
-    const response = await fetch(`${env.ZAI_BASE_URL.replace(/\/$/, '')}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${env.ZAI_API_KEY}` },
-      body: form,
-      signal: AbortSignal.timeout(90_000),
-    });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 300);
-      throw new Error(`Z.AI transcription failed (${response.status}): ${detail}`);
+    // GLM-ASR can occasionally hallucinate a different writing system for
+    // noisy Spanish voice notes. Retry once with an explicit language guard;
+    // never persist the foreign-language hallucination as if it were valid.
+    if (hasUnexpectedWritingSystem(text)) {
+      text = await requestZaiTranscription(
+        chunks[index]!,
+        index,
+        `${prompt}\nIMPORTANTE: el audio es español de Argentina. No traduzcas ni uses caracteres chinos, japoneses, coreanos o cirílicos.`,
+      );
     }
-    const result = (await response.json()) as { text?: string };
-    if (result.text?.trim()) transcripts.push(result.text.trim());
+    if (hasUnexpectedWritingSystem(text)) {
+      throw new Error(`Transcription chunk ${index + 1} rejected because the detected language is not Spanish`);
+    }
+    if (text) transcripts.push(text);
   }
 
   return transcripts.join(' ').trim() || null;
+}
+
+async function requestZaiTranscription(chunk: Buffer, index: number, prompt: string): Promise<string> {
+  const env = loadEnv();
+  const form = new FormData();
+  form.append('model', env.ZAI_TRANSCRIPTION_MODEL);
+  form.append('stream', 'false');
+  form.append('prompt', prompt.slice(-4000));
+  form.append(
+    'file',
+    new Blob([new Uint8Array(chunk)], { type: 'audio/wav' }),
+    `audio-${index + 1}.wav`,
+  );
+
+  const response = await fetch(`${env.ZAI_BASE_URL.replace(/\/$/, '')}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.ZAI_API_KEY}` },
+    body: form,
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`Z.AI transcription failed (${response.status}): ${detail}`);
+  }
+  const result = (await response.json()) as { text?: string };
+  return result.text?.trim() ?? '';
+}
+
+/**
+ * Reject obvious wrong-language hallucinations while allowing Spanish accents,
+ * punctuation, numbers and occasional names from other Latin alphabets.
+ */
+export function hasUnexpectedWritingSystem(text: string): boolean {
+  const unexpected =
+    text.match(
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}]/gu,
+    )?.length ?? 0;
+  if (unexpected === 0) return false;
+  const letters = text.match(/\p{Letter}/gu)?.length ?? 0;
+  return unexpected >= 3 && unexpected / Math.max(letters, 1) >= 0.08;
 }
 
 async function convertToWavChunks(buffer: Buffer, filename?: string, mime?: string): Promise<Buffer[]> {

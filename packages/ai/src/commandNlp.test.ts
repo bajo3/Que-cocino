@@ -21,6 +21,7 @@ describe('parseCommandHeuristic — slash commands', () => {
 
   it('parses /pendientes and /sin-responder', () => {
     expect(parseCommandHeuristic('/pendientes').intent).toBe('pending');
+    expect(parseCommandHeuristic('pendientes?').intent).toBe('pending');
     expect(parseCommandHeuristic('/sin-responder').intent).toBe('unanswered');
   });
 
@@ -90,6 +91,49 @@ describe('parseCommandHeuristic — natural language', () => {
     expect(r.intent).toBe('create_task');
     expect(r.task?.title).toBe('Subir historias Ventas Jesus');
     expect(r.task?.dueAt).toBeNull();
+  });
+
+  it('removes stacked task markers from the title', () => {
+    const r = parseCommandHeuristic('Tarea pendiente cambiar precio motorhome 58.000usd sprinter');
+    expect(r.intent).toBe('create_task');
+    expect(r.task?.title).toBe('Cambiar precio motorhome 58.000usd sprinter');
+  });
+
+  it.each([
+    'Agrega pendiente cambiar el precio de la Sprinter',
+    'Agregame como pendiente cambiar el precio de la Sprinter',
+    'Poneme como pendiente cambiar el precio de la Sprinter',
+    'Dejame pendiente cambiar el precio de la Sprinter',
+    'Sumame como tarea cambiar el precio de la Sprinter',
+    'Tengo pendiente cambiar el precio de la Sprinter',
+    'Me queda pendiente cambiar el precio de la Sprinter',
+    'Tengo que cambiar el precio de la Sprinter',
+    'Hay que cambiar el precio de la Sprinter',
+    'Me falta cambiar el precio de la Sprinter',
+    'Como tarea, agregar cambiar el precio de la Sprinter',
+  ])('understands a natural pending command: %s', (text) => {
+    const r = parseCommandHeuristic(text);
+    expect(r.intent).toBe('create_task');
+    expect(r.task?.title).toBe('Cambiar el precio de la Sprinter');
+  });
+
+  it('drops conversational filler at the end of a pending command', () => {
+    const r = parseCommandHeuristic('Agrega pendiente llamar a Ricky y ya');
+    expect(r.intent).toBe('create_task');
+    expect(r.task?.title).toBe('Llamar a Ricky');
+  });
+
+  it('parses a short spoken list as multiple real tasks', () => {
+    const now = new Date(2026, 6, 13, 12, 0, 0);
+    const r = parseCommandHeuristic(
+      'Agregame revisar refrigerador en diez días, llevar a Paco al veterinario',
+      now,
+    );
+    expect(r.intent).toBe('create_task');
+    expect(r.tasks).toHaveLength(2);
+    expect(r.tasks?.[0]?.title).toBe('Revisar refrigerador');
+    expect(r.tasks?.[0]?.dueAt).toBeTruthy();
+    expect(r.tasks?.[1]?.title).toBe('Llevar a Paco al veterinario');
   });
 
   it('extracts tomorrow, time and a one-hour reminder', () => {

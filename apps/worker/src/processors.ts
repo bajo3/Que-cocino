@@ -173,10 +173,20 @@ export async function transcribeAudioJob(job: Job): Promise<void> {
       text,
       '',
     ]);
-    await enqueue(QUEUE_NAMES.processMessage, { messageId, chatId });
     const message = await getMessageById(messageId);
+    const isControlAudio =
+      !!message?.from_me &&
+      !!env.CONTROL_CHAT_JID &&
+      chatId === env.CONTROL_CHAT_JID;
+
+    // A control-chat voice note is a command. Sending it through the general
+    // message analyzer as well caused the same audio to create paraphrased or
+    // duplicate tasks before the command parser handled it.
+    if (!isControlAudio) {
+      await enqueue(QUEUE_NAMES.processMessage, { messageId, chatId });
+    }
     await reprocessControlAudioCommand({ messageId, chatId, fromMe: !!message?.from_me });
-    logger.info({ transcriptId, messageId }, 'audio transcribed');
+    logger.info({ transcriptId, messageId, isControlAudio }, 'audio transcribed');
   } catch (err) {
     const m = (err as Error).message;
     await failTranscript(transcriptId, m);

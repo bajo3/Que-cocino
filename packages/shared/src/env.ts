@@ -27,6 +27,11 @@ const EnvSchema = z.object({
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_TRANSCRIPTION_MODEL: z.string().default('gpt-4o-mini-transcribe'),
+  AUDIO_TRANSCRIPTION_PROMPT: z
+    .string()
+    .default(
+      'El audio está hablado en español rioplatense de Argentina. Transcribí literalmente y no traduzcas a otro idioma. Vocabulario frecuente: Felipe, Feli, Jesús, Paco, Ricky, Cruz, Citroën, C4 Cactus, Sprinter, Mercedes-Benz, motorhome, Mercado Libre, catálogo, USD, dólares, veterinario.',
+    ),
   OPENAI_CHAT_MODEL: z.string().default('gpt-4.1-mini'),
   OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
 

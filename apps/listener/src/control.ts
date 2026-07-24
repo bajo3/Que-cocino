@@ -22,9 +22,19 @@ import {
   updateFinanceEntry,
   getSetting,
   setSetting,
+  recentMessages,
 } from '@wma/db';
 import { connectionState } from './baileys.js';
 import { convertUsdToArs, loadEnv, logger, type ParsedCommand } from '@wma/shared';
+import {
+  isReceivablesFollowUpQuery,
+  isReceivablesQuery,
+  isReceivablesSaveConfirmation,
+  parseReceivablesClientName,
+  parseReceivableAppend,
+  parseReceivablesList,
+  type ReceivableComponent,
+} from './receivables.js';
 
 const ai = new AIProcessor();
 
@@ -40,8 +50,47 @@ export async function handleControlCommand(
   sourceChatId: string,
   options: { allowConversation?: boolean } = {},
 ): Promise<string | null> {
-  const parsed = await ai.parseCommand(text);
+  const reply = await handleControlCommandCore(sock, text, sourceMessageId, sourceChatId, options);
+  if (reply) {
+    await setSetting('last_assistant_reply', {
+      text: reply,
+      userText: text,
+      createdAt: new Date().toISOString(),
+    }).catch((error) =>
+      logger.warn({ err: (error as Error).message }, 'could not persist assistant turn context'),
+    );
+  }
+  return reply;
+}
+
+async function handleControlCommandCore(
+  sock: WASocket,
+  text: string,
+  sourceMessageId: string | null,
+  sourceChatId: string,
+  options: { allowConversation?: boolean } = {},
+): Promise<string | null> {
+  if (options.allowConversation !== false) {
+    const receivablesReply = await handleReceivablesText(text, sourceMessageId, sourceChatId);
+    if (receivablesReply) {
+      await setSetting('last_assistant_topic', 'finance');
+      const logId = await insertCommandLog({
+        sourceMessageId,
+        commandText: text,
+        parsedIntent: 'unknown',
+        parsedPayload: { receivablesAgent: true },
+        status: 'parsed',
+      });
+      await updateCommandLog(logId, { status: 'done' });
+      return receivablesReply;
+    }
+  }
+
+  const parsed = await ai.parseCommand(text, {
+    context: () => buildAgentCommandContext(sourceChatId, sourceMessageId),
+  });
   if (parsed.intent === 'unknown') {
+    if (parsed.clarification) return parsed.clarification;
     if (options.allowConversation !== false) {
       const financeReply = await handleFinanceAgentText(text);
       if (financeReply) {
@@ -186,26 +235,43 @@ async function execute(
 
     case 'create_task': {
       if (!cmd.task?.title) return 'No pude identificar la tarea.';
-      const id = await insertTask({
-        chatId: sourceChatId,
-        task: {
-          title: cmd.task.title,
-          priority: cmd.task.priority ?? 'normal',
-          dueAt: cmd.task.dueAt ?? null,
-        },
-        sourceMessageId,
-        project: cmd.task.project ?? null,
-        remindAt: cmd.task.remindAt ?? null,
-        source: 'manual_whatsapp',
-        recurrence: cmd.task.recurrence ?? null,
-      });
-      const due = cmd.task.dueAt
-        ? new Date(cmd.task.dueAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
-        : 'sin fecha';
-      const reminder = cmd.task.remindAt
-        ? `\n🔔 Aviso: ${new Date(cmd.task.remindAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}`
-        : '';
-      return `✅ *Tarea creada*\n${cmd.task.title}\n📅 ${due}${reminder}\nID: ${id.slice(0, 8)}`;
+      const taskItems = cmd.tasks?.length ? cmd.tasks : [cmd.task];
+      const created = await Promise.all(
+        taskItems.map(async (task) => {
+          const id = await insertTask({
+            chatId: sourceChatId,
+            task: {
+              title: task.title,
+              priority: task.priority ?? 'normal',
+              dueAt: task.dueAt ?? null,
+            },
+            sourceMessageId,
+            project: task.project ?? null,
+            remindAt: task.remindAt ?? null,
+            source: 'manual_whatsapp',
+            recurrence: task.recurrence ?? null,
+          });
+          const due = task.dueAt
+            ? new Date(task.dueAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
+            : 'sin fecha';
+          const reminder = task.remindAt
+            ? ` · aviso ${new Date(task.remindAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}`
+            : '';
+          return { id, task, due, reminder };
+        }),
+      );
+      if (created.length === 1) {
+        const item = created[0]!;
+        const timing = item.task.dueAt ? ` · ${item.due}${item.reminder}` : '';
+        return `✅ ${item.task.title}${timing}`;
+      }
+      return [
+        '✅ Pendientes agregados',
+        ...created.map((item) => {
+          const timing = item.task.dueAt ? ` · ${item.due}${item.reminder}` : '';
+          return `- ${item.task.title}${timing}`;
+        }),
+      ].join('\n');
     }
 
     case 'finance_add': {
@@ -356,6 +422,63 @@ function formatFinanceComponent(component: { amount: number; currency: 'ARS' | '
   return component.currency === 'USD' ? formatUsd(component.amount) : formatArs(component.amount);
 }
 
+type ReceivablesBatch = {
+  sourceMessageId: string | null;
+  ids: string[];
+  createdAt: string;
+  client?: string | null;
+  awaitingClient?: boolean;
+};
+
+async function handleReceivablesText(
+  text: string,
+  sourceMessageId: string | null,
+  sourceChatId: string,
+): Promise<string | null> {
+  const receivables = parseReceivablesList(text);
+  if (receivables) return saveReceivablesList(receivables, sourceMessageId);
+
+  if (isReceivablesSaveConfirmation(text)) {
+    const rows = await recentMessages(sourceChatId, 12);
+    const previous = rows.find(
+      (row: any) => row.id !== sourceMessageId && parseReceivablesList(String(row.text_content ?? '')),
+    );
+    const previousList = previous ? parseReceivablesList(String(previous.text_content ?? '')) : null;
+    if (!previous || !previousList) return 'No encontré una lista reciente de trabajos para cargar.';
+    return saveReceivablesList(previousList, previous.id ?? sourceMessageId, true);
+  }
+
+  const batchForClient = await getSetting<ReceivablesBatch>('last_receivables_batch');
+  if (batchForClient?.awaitingClient) {
+    const client = parseReceivablesClientName(text);
+    if (client) return assignReceivablesClient(batchForClient, client);
+  }
+
+  const append = parseReceivableAppend(text);
+  if (append) {
+    const lastTopic = await getSetting<string>('last_assistant_topic');
+    if (lastTopic !== 'finance') return null;
+    return appendToReceivable(append.index, append.detail);
+  }
+
+  const explicitQuery = isReceivablesQuery(text);
+  const contextualQuery =
+    /^(?:mis\s+)?pendientes\s*[?¿!]*$/i.test(text.trim()) ||
+    isReceivablesFollowUpQuery(text);
+  if (!explicitQuery && !contextualQuery) return null;
+
+  const lastTopic = await getSetting<string>('last_assistant_topic');
+  const batch = await getSetting<ReceivablesBatch>('last_receivables_batch');
+  if (
+    explicitQuery ||
+    (contextualQuery && lastTopic === 'finance' && !!batch?.ids?.length)
+  ) {
+    return renderReceivablesBatch(batch);
+  }
+
+  return null;
+}
+
 async function handleFinanceAgentText(text: string): Promise<string | null> {
   if (/\b(deshacer|deshace|reverti|revertir|volver atras|volver atrás)\b/i.test(text)) {
     return undoLastFinanceChange();
@@ -375,9 +498,121 @@ async function handleFinanceAgentText(text: string): Promise<string | null> {
   return null;
 }
 
-type FinanceComponent = { amount: number; currency: 'ARS' | 'USD' };
+type FinanceComponent = ReceivableComponent;
 type FinanceReplacement = { description: string; components: FinanceComponent[] };
 type FinanceSplitCorrection = { oldTotal: number | null; replacements: FinanceReplacement[] };
+
+async function saveReceivablesList(
+  receivables: { description: string; components: ReceivableComponent[] }[],
+  sourceMessageId: string | null,
+  awaitingClient = false,
+): Promise<string> {
+  const previous = await getSetting<ReceivablesBatch>('last_receivables_batch');
+  if (sourceMessageId && previous?.sourceMessageId === sourceMessageId && previous.ids.length > 0) {
+    const reused = awaitingClient ? { ...previous, awaitingClient: true } : previous;
+    if (reused !== previous) await setSetting('last_receivables_batch', reused);
+    const rendered = await renderReceivablesBatch(reused);
+    return awaitingClient
+      ? `${rendered}\n\nYa estaban cargados. Si querés asociarlos a un cliente, pasame el nombre.`
+      : rendered;
+  }
+
+  const resolved = await Promise.all(receivables.map((entry) => resolveFinanceReplacement(entry)));
+  const ids: string[] = [];
+  for (const entry of resolved) {
+    ids.push(
+      await insertFinanceEntry({
+        kind: 'debt',
+        amount: entry.amount,
+        currency: 'ARS',
+        category: 'cobro pendiente',
+        description: entry.description,
+        status: 'pending',
+        sourceMessageId: null,
+      }),
+    );
+  }
+
+  const batch: ReceivablesBatch = {
+    sourceMessageId,
+    ids,
+    createdAt: new Date().toISOString(),
+    client: null,
+    awaitingClient,
+  };
+  await setSetting('last_receivables_batch', batch);
+  const rendered = await renderReceivablesBatch(batch);
+  return awaitingClient
+    ? `${rendered}\n\nSi querés asociarlos a un cliente, pasame el nombre.`
+    : rendered;
+}
+
+async function assignReceivablesClient(batch: ReceivablesBatch, client: string): Promise<string> {
+  const entries = await listFinanceEntries(500);
+  const byId = new Map(entries.map((entry: any) => [entry.id, entry]));
+  for (const id of batch.ids) {
+    const entry = byId.get(id) as any;
+    if (!entry || entry.kind !== 'debt' || entry.status !== 'pending') continue;
+    await updateFinanceEntry(id, { category: `cobro pendiente · ${client}` });
+  }
+
+  const updated: ReceivablesBatch = {
+    ...batch,
+    client,
+    awaitingClient: false,
+  };
+  await setSetting('last_receivables_batch', updated);
+  return renderReceivablesBatch(updated);
+}
+
+async function appendToReceivable(index: number, detail: string): Promise<string> {
+  const batch = await getSetting<ReceivablesBatch>('last_receivables_batch');
+  if (!batch?.ids?.length) {
+    return 'No tengo una lista reciente de cobros para modificar.';
+  }
+  const id = batch.ids[index - 1];
+  if (!id) {
+    return `La lista tiene ${batch.ids.length} cobro(s); no existe el número ${index}.`;
+  }
+
+  const entries = await listFinanceEntries(500);
+  const entry = entries.find((candidate: any) => candidate.id === id);
+  if (!entry || entry.kind !== 'debt' || entry.status !== 'pending') {
+    return `El cobro número ${index} ya no está pendiente o no existe.`;
+  }
+
+  const current = String(entry.description ?? '').trim();
+  const normalizedCurrent = normalizeForMatch(current);
+  const normalizedDetail = normalizeForMatch(detail);
+  const description = normalizedCurrent.includes(normalizedDetail)
+    ? current
+    : `${current} · ${detail}`;
+  await updateFinanceEntry(id, { description });
+  return renderReceivablesBatch(batch);
+}
+
+async function renderReceivablesBatch(batch: ReceivablesBatch | null): Promise<string> {
+  if (!batch?.ids?.length) return 'No tengo cobros pendientes registrados.';
+
+  const entries = await listFinanceEntries(500);
+  const byId = new Map(entries.map((entry: any) => [entry.id, entry]));
+  const pending = batch.ids
+    .map((id, index) => ({ entry: byId.get(id) as any, index }))
+    .filter(({ entry }) => entry?.kind === 'debt' && entry.status === 'pending');
+  if (pending.length === 0) return 'No quedan cobros pendientes de esa lista. ✅';
+
+  const total = pending.reduce((sum, { entry }) => sum + Number(entry.amount ?? 0), 0);
+  return [
+    '*Cobros pendientes*',
+    batch.client ? `Cliente: *${batch.client}*` : '',
+    ...pending.map(
+      ({ entry, index }) => `${index + 1}. ${entry.description} — ${formatArs(Number(entry.amount ?? 0))}`,
+    ),
+    `*Total a cobrar: ${formatArs(total)}*`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 async function applyFinanceSplitCorrection(correction: FinanceSplitCorrection): Promise<string> {
   const entries = await listFinanceEntries(200);
@@ -660,6 +895,33 @@ function titleCase(text: string): string {
     .filter(Boolean)
     .map((word) => (word.length <= 3 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()))
     .join(' ');
+}
+
+async function buildAgentCommandContext(
+  sourceChatId: string,
+  sourceMessageId: string | null,
+): Promise<string> {
+  const [rows, lastReply, lastTopic] = await Promise.all([
+    recentMessages(sourceChatId, 12),
+    getSetting<{ text?: string; userText?: string; createdAt?: string }>('last_assistant_reply'),
+    getSetting<string>('last_assistant_topic'),
+  ]);
+
+  const history = rows
+    .filter((row: any) => row.id !== sourceMessageId && String(row.text_content ?? '').trim())
+    .reverse()
+    .slice(-8)
+    .map((row: any) => `FELIPE: ${truncate(String(row.text_content), 280)}`);
+
+  return [
+    lastTopic ? `Tema activo: ${lastTopic}` : '',
+    history.length ? `Pedidos recientes:\n${history.join('\n')}` : '',
+    lastReply?.text
+      ? `Última respuesta del asistente:\n${truncate(lastReply.text, 600)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 async function buildAssistantContext(text: string): Promise<string> {

@@ -19,6 +19,7 @@ export function parseCommandHeuristic(input: string, now = new Date()): ParsedCo
   if (lower === '/resumen hoy') return simple('summary_today');
   if (lower === '/clientes calientes') return simple('hot_leads');
   if (lower === '/pendientes') return simple('pending');
+  if (/^(?:mis\s+)?pendientes\s*[?¿!]*$/i.test(lower)) return simple('pending');
   if (lower === '/agenda' || lower === '/hoy' || lower === 'que tengo hoy' || lower === 'qué tengo hoy') {
     return simple('agenda_today');
   }
@@ -104,38 +105,63 @@ function parseTask(raw: string, now: Date): ParsedCommand | null {
   const normalized = raw.trim();
   const lower = normalized.toLowerCase();
   const prefix = lower.match(
-    /^(?:\/tarea\s+|pendiente\s*:?\s*|tarea\s*:?\s*|recordame\s+|recu[eé]rdame\s+|anota(?:me)?\s+|anot[aá](?:me)?\s+)/i,
+    /^(?:\/tarea\s+|(?:como\s+)?pendiente\s*[:,]?\s*|(?:como\s+)?tarea\s*[:,]?\s*|recordame\s+|recu[eé]rdame\s+|anota(?:me)?\s+|anot[aá](?:me)?\s+|agreg(?:a|á|ar)(?:me|mos)?\s+|(?:poneme|pon[eé]|pone|dejame|dej[aá]|deja|sumame|sum[aá]|suma)\s+(?:como\s+)?(?:tarea|pendiente)\s*[:,]?\s*|(?:tengo|me queda|queda)\s+(?:como\s+)?pendiente\s*[:,]?\s*|(?:tengo|tenemos|hay)\s+que\s+|me\s+falta\s+|me\s+queda\s+)/i,
   );
   if (!prefix) return null;
 
-  const due = extractDueDate(normalized, now);
-  const reminder = extractReminder(normalized, due);
-  const recurrence = extractRecurrence(normalized);
-  const title = normalized
+  const body = normalized
     .slice(prefix[0].length)
+    .replace(/^(?:(?:como\s+)?(?:tarea|pendiente)\s*[:,]?\s*)+/i, '')
+    .replace(/^agreg(?:a|á|ar)(?:me|mos)?\s+/i, '')
+    .trim();
+  const items = splitTaskItems(body)
+    .map((item) => parseTaskItem(item, now))
+    .filter((item): item is NonNullable<ParsedCommand['task']> => !!item);
+  if (items.length === 0) return null;
+
+  return {
+    intent: 'create_task',
+    confidence: 0.98,
+    raw,
+    task: items[0],
+    tasks: items.length > 1 ? items : undefined,
+  };
+}
+
+function parseTaskItem(value: string, now: Date): NonNullable<ParsedCommand['task']> | null {
+  const due = extractDueDate(value, now);
+  const reminder = extractReminder(value, due);
+  const recurrence = extractRecurrence(value);
+  const title = value
     .replace(/\b(?:hoy|mañana|manana)\b/gi, '')
+    .replace(/\b(?:en|a)\s+(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+d[ií]as?\b/gi, '')
     .replace(/\bel\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/gi, '')
     .replace(/\ba\s+las?\s+\d{1,2}(?::\d{2})?(?:\s*hs?)?\b/gi, '')
     .replace(/\b\d{1,2}(?::\d{2})?\s*hs\b/gi, '')
     .replace(/\b(?:todos los dias|todas las semanas|todos los meses|cada dia|cada semana|cada mes)\b/gi, '')
     .replace(/[,;]?\s*(?:recordame|recu[eé]rdame|avisame|av[ií]same)\s+(?:\d+\s+|una?\s+)?(?:minutos?|horas?)?\s*antes\b/gi, '')
+    .replace(/[,;]?\s+(?:y\s+)?(?:ya|nada\s+m[aá]s|listo)\s*[.!]?$/i, '')
     .replace(/\s+/g, ' ')
     .replace(/^[,;:\s]+|[,;:\s]+$/g, '')
     .trim();
 
   if (!title) return null;
   return {
-    intent: 'create_task',
-    confidence: 0.98,
-    raw,
-    task: {
-      title: title.charAt(0).toUpperCase() + title.slice(1),
-      dueAt: due?.toISOString() ?? null,
-      remindAt: reminder?.toISOString() ?? null,
-      priority: /\b(?:urgente|importante|prioridad alta)\b/i.test(raw) ? 'high' : 'normal',
-      recurrence,
-    },
+    title: title.charAt(0).toUpperCase() + title.slice(1),
+    dueAt: due?.toISOString() ?? null,
+    remindAt: reminder?.toISOString() ?? null,
+    priority: /\b(?:urgente|importante|prioridad alta)\b/i.test(value) ? 'high' : 'normal',
+    recurrence,
   };
+}
+
+function splitTaskItems(body: string): string[] {
+  return body
+    .split(
+      /(?:\r?\n|;|,\s*(?=(?:llevar|cambiar|subir|bajar|responder|contestar|contactar|enviar|mandar|revisar|verificar|llamar|comprar|pagar|buscar|hacer)\b))/i,
+    )
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
 }
 
 function extractRecurrence(raw: string): 'daily' | 'weekly' | 'monthly' | null {
@@ -300,7 +326,13 @@ function extractDueDate(raw: string, now: Date): Date | null {
   const lower = raw.toLowerCase();
   let date: Date | null = null;
 
-  if (/\bmañana\b|\bmanana\b/.test(lower)) {
+  const relativeDays = lower.match(
+    /\b(?:en|a)\s+(\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+d[ií]as?\b/i,
+  );
+  if (relativeDays) {
+    date = new Date(now);
+    date.setDate(date.getDate() + parseSpanishCount(relativeDays[1]!));
+  } else if (/\bmañana\b|\bmanana\b/.test(lower)) {
     date = new Date(now);
     date.setDate(date.getDate() + 1);
   } else if (/\bhoy\b/.test(lower)) {
@@ -325,6 +357,23 @@ function extractDueDate(raw: string, now: Date): Date | null {
     date.setHours(18, 0, 0, 0);
   }
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseSpanishCount(value: string): number {
+  if (/^\d+$/.test(value)) return Number(value);
+  return {
+    un: 1,
+    una: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+    siete: 7,
+    ocho: 8,
+    nueve: 9,
+    diez: 10,
+  }[value.toLowerCase()] ?? 0;
 }
 
 function extractReminder(raw: string, due: Date | null): Date | null {

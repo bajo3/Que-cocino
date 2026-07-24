@@ -62,6 +62,8 @@ export type CommandIntent =
 
 export interface ParsedCommand {
   intent: CommandIntent;
+  /** Short question to ask when an action is understood but one required field is missing. */
+  clarification?: string;
   /** 'contact' | 'group' when the command targets someone. */
   targetType?: 'contact' | 'group';
   /** Free-text target (name / phone / group subject). */
@@ -79,6 +81,15 @@ export interface ParsedCommand {
     priority?: Priority;
     recurrence?: 'daily' | 'weekly' | 'monthly' | null;
   };
+  /** Multiple tasks when one explicit command contains a short list. */
+  tasks?: {
+    title: string;
+    dueAt?: string | null;
+    remindAt?: string | null;
+    project?: string | null;
+    priority?: Priority;
+    recurrence?: 'daily' | 'weekly' | 'monthly' | null;
+  }[];
   finance?: {
     kind: 'income' | 'expense' | 'debt';
     amount: number;
